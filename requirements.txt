@@ -1,0 +1,48 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# requirements.txt — BioAI Insight Engine
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# WHY PINNED VERSIONS:
+#   Using exact versions prevents "dependency drift" — the silent breakage
+#   that happens when a library updates and your code no longer works.
+#   This is a production engineering requirement and a common interview question.
+#
+# INSTALL:
+#   pip install -r requirements.txt
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ─── Web Framework (API) ──────────────────────────────────────────────────────
+fastapi==0.111.0
+uvicorn[standard]==0.29.0
+pydantic==2.7.1
+
+# ─── Frontend ─────────────────────────────────────────────────────────────────
+streamlit==1.35.0
+
+# ─── ML Core ──────────────────────────────────────────────────────────────────
+scikit-learn==1.5.0
+numpy==1.26.4
+pandas==2.2.2
+joblib==1.4.2
+
+# ─── Visualisation ────────────────────────────────────────────────────────────
+matplotlib==3.9.0
+
+# ─── Explainability ───────────────────────────────────────────────────────────
+shap==0.45.0
+
+# ─── RAG Stack ────────────────────────────────────────────────────────────────
+sentence-transformers==3.0.1
+faiss-cpu==1.8.0
+pymupdf==1.24.4                 # for PDF parsing (fitz)
+
+# ─── Deep Learning (optional DL model) ───────────────────────────────────────
+torch==2.3.0
+# Note: Use torch==2.3.0+cu118 for CUDA GPU support
+
+# ─── Experiment Tracking (optional) ──────────────────────────────────────────
+wandb==0.17.0
+
+# ─── Dev / Testing ────────────────────────────────────────────────────────────
+pytest==8.2.0
+httpx==0.27.0                   # for FastAPI TestClient in tests

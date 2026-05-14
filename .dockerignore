@@ -1,0 +1,57 @@
+# .dockerignore
+# ──────────────────────────────────────────────────────────────────
+# Files excluded from the Docker build context.
+# Keeping the build context small speeds up docker build and reduces
+# the risk of accidentally baking secrets into the image.
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+
+# Virtual environments
+venv/
+.venv/
+env/
+ENV/
+
+# Trained models (volume-mount or build-time train instead)
+# Uncomment if you want to exclude models from the image:
+# models/*.pkl
+
+# Test files
+test.py
+tests/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# Git
+.git/
+.gitignore
+
+# Docs
+*.md
+docs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment variables (NEVER bake secrets into an image)
+.env
+*.env
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# Outputs (regenerated at runtime)
+outputs/
+
+# W&B artifacts
+wandb/
