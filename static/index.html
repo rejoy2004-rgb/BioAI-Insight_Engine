@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>BioAI Insight Engine - Cancer Risk Diagnostics & RAG Search</title>
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="app-container">
+        <!-- Sidebar Navigation -->
+        <aside class="sidebar">
+            <div class="logo-area">
+                <i class="fa-solid fa-microscope logo-icon"></i>
+                <div class="logo-text">
+                    <h1>BioAI Insight</h1>
+                    <span>ENGINE v1.0</span>
+                </div>
+            </div>
+            <nav class="nav-menu">
+                <a href="#" class="nav-item active" data-tab="patient-predict">
+                    <i class="fa-solid fa-user-doctor"></i>
+                    <span>Patient Diagnostics</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="model-metrics">
+                    <i class="fa-solid fa-chart-line"></i>
+                    <span>Model Analytics</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="rag-search">
+                    <i class="fa-solid fa-magnifying-glass-chart"></i>
+                    <span>Literature RAG</span>
+                </a>
+                <a href="#" class="nav-item" data-tab="batch-inference">
+                    <i class="fa-solid fa-file-csv"></i>
+                    <span>Batch Prediction</span>
+                </a>
+            </nav>
+            <div class="sidebar-footer">
+                <div class="status-indicator">
+                    <span class="status-dot online"></span>
+                    <span id="api-status-text">API Online</span>
+                </div>
+                <div class="latency-badge" id="api-latency">-- ms latency</div>
+            </div>
+        </aside>
+
+        <!-- Main Content Panel -->
+        <main class="main-content">
+            <!-- Top Dashboard Header -->
+            <header class="dashboard-header">
+                <div class="header-title">
+                    <h2 id="current-tab-title">Patient Diagnostics Dashboard</h2>
+                    <p>Clinical breast cancer risk classification with SHAP local explainability and feature attributions.</p>
+                </div>
+                <div class="header-actions">
+                    <a href="/docs" target="_blank" class="btn btn-outline">
+                        <i class="fa-solid fa-book-open-reader"></i> Swagger API Docs
+                    </a>
+                </div>
+            </header>
+
+            <!-- Tab Content: Patient Predict -->
+            <section class="tab-content active" id="patient-predict-tab">
+                <div class="grid-2col">
+                    <!-- Left: Clinical Features Sliders -->
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="fa-solid fa-sliders"></i>
+                            <h3>Patient Clinical Inputs</h3>
+                        </div>
+                        <div class="card-body">
+                            <form id="predict-form" class="feature-form">
+                                <div class="slider-group">
+                                    <div class="slider-header">
+                                        <label for="cl_thickness">Clump Thickness</label>
+                                        <span class="slider-val" id="val-cl_thickness">5</span>
+                                    </div>
+                                    <input type="range" id="cl_thickness" name="Cl.thickness" min="1" max="10" value="5" class="range-slider">
+                                    <p class="slider-desc">Assess cell grouping density and layer arrangement (1-10).</p>
+                                </div>
+
+                                <div class="slider-group">
+                                    <div class="slider-header">
+                                        <label for="cell_size">Uniformity of Cell Size</label>
+                                        <span class="slider-val" id="val-cell_size">3</span>
+                                    </div>
+                                    <input type="range" id="cell_size" name="Cell.size" min="1" max="10" value="3" class="range-slider">
+                                    <p class="slider-desc">Measures consistency in volume among cancer cells (1-10).</p>
+                                </div>
+
+                                <div class="slider-group">
+                                    <div class="slider-header">
+                                        <label for="cell_shape">Uniformity of Cell Shape</label>
+                                        <span class="slider-val" id="val-cell_shape">3</span>
+                                    </div>
+                                    <input type="range" id="cell_shape" name="Cell.shape" min="1" max="10" value="3" class="range-slider">
+                                    <p class="slider-desc">Measures variability in shape outline of tumor cells (1-10).</p>
+                                </div>
+
+                                <div class="slider-group">
+                                    <div class="slider-header">
+                                        <label for="marg_adhesion">Marginal Adhesion</label>
+                                        <span class="slider-val" id="val-marg_adhesion">1</span>
+                                    </div>
+                                    <input type="range" id="marg_adhesion" name="Marg.adhesion" min="1" max="10" value="1" class="range-slider">
+                                    <p class="slider-desc">Degree of cell sticking; normal cells tend to adhere together (1-10).</p>
+                                </div>
+
+                                <div class="slider-group">
+                                    <div class="slider-header">
+                                        <label for="epith_c_size">Single Epithelial Cell Size</label>
+                                        <span class="slider-val" id="val-epith_c_size">2</span>
+                                    </div>
+                                    <input type="range" id="epith_c_size" name="Epith.c.size" min="1" max="10" value="2" class="range-slider">
+                                    <p class="slider-desc">Enlarged epithelial cells can indicate pre-cancerous mutations (1-10).</p>
+                                </div>
+
+                                <div class="slider-group">
+                                    <div class="slider-header">
+                                        <label for="bare_nuclei">Bare Nuclei</label>
+                                        <span class="slider-val" id="val-bare_nuclei">1</span>
+                                    </div>
+                                    <input type="range" id="bare_nuclei" name="Bare.nuclei" min="1" max="10" value="1" class="range-slider">
+                                    <p class="slider-desc">Nuclei not surrounded by cytoplasm (common in malignant samples) (1-10).</p>
+                                </div>
+
+                                <div class="slider-group">
+                                    <div class="slider-header">
+                                        <label for="bl_cromatin">Bland Chromatin</label>
+                                        <span class="slider-val" id="val-bl_cromatin">3</span>
+                                    </div>
+                                    <input type="range" id="bl_cromatin" name="Bl.cromatin" min="1" max="10" value="3" class="range-slider">
+                                    <p class="slider-desc">Uniformity of nuclear texture; cancer cells have coarser chromatin (1-10).</p>
+                                </div>
+
+                                <div class="slider-group">
+                                    <div class="slider-header">
+                                        <label for="normal_nucleoli">Normal Nucleoli</label>
+                                        <span class="slider-val" id="val-normal_nucleoli">1</span>
+                                    </div>
+                                    <input type="range" id="normal_nucleoli" name="Normal.nucleoli" min="1" max="10" value="1" class="range-slider">
+                                    <p class="slider-desc">Identifies small structures inside nucleus; prominent in malignant cells (1-10).</p>
+                                </div>
+
+                                <div class="slider-group">
+                                    <div class="slider-header">
+                                        <label for="mitoses">Mitoses</label>
+                                        <span class="slider-val" id="val-mitoses">1</span>
+                                    </div>
+                                    <input type="range" id="mitoses" name="Mitoses" min="1" max="10" value="1" class="range-slider">
+                                    <p class="slider-desc">Rate of active cell division (higher rates are more dangerous) (1-10).</p>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Right: Prediction Results & Local SHAP Explainability -->
+                    <div class="flex-column">
+                        <div class="card result-card">
+                            <div class="card-header">
+                                <i class="fa-solid fa-stethoscope"></i>
+                                <h3>Prediction Diagnostics</h3>
+                            </div>
+                            <div class="card-body centered-results">
+                                <div class="result-visualization">
+                                    <!-- Radial Confidence Meter -->
+                                    <div class="progress-gauge">
+                                        <svg class="gauge-svg" viewBox="0 0 120 120">
+                                            <circle class="gauge-bg" cx="60" cy="60" r="50"></circle>
+                                            <circle class="gauge-fill" id="gauge-stroke" cx="60" cy="60" r="50" stroke-dasharray="314.16" stroke-dashoffset="314.16"></circle>
+                                        </svg>
+                                        <div class="gauge-center">
+                                            <span id="result-probability">0.0%</span>
+                                            <small>Confidence</small>
+                                        </div>
+                                    </div>
+
+                                    <div class="result-info">
+                                        <div class="badge" id="risk-badge">Low Risk</div>
+                                        <p id="risk-explanation">Predicting low cancer probability based on standard values.</p>
+                                    </div>
+                                </div>
+                                
+                                <div class="model-probabilities-breakdown">
+                                    <div class="model-prob-item">
+                                        <span>Random Forest</span>
+                                        <div class="prob-bar-container">
+                                            <div class="prob-bar-fill" id="model-rf-bar" style="width: 0%"></div>
+                                        </div>
+                                        <span class="prob-num" id="model-rf-val">0.0%</span>
+                                    </div>
+                                    <div class="model-prob-item">
+                                        <span>Logistic Reg</span>
+                                        <div class="prob-bar-container">
+                                            <div class="prob-bar-fill" id="model-lr-bar" style="width: 0%"></div>
+                                        </div>
+                                        <span class="prob-num" id="model-lr-val">0.0%</span>
+                                    </div>
+                                    <div class="model-prob-item">
+                                        <span>SVM (RBF Kernel)</span>
+                                        <div class="prob-bar-container">
+                                            <div class="prob-bar-fill" id="model-svm-bar" style="width: 0%"></div>
+                                        </div>
+                                        <span class="prob-num" id="model-svm-val">0.0%</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Local Explainability (SHAP attributions) -->
+                        <div class="card explain-card flex-grow">
+                            <div class="card-header">
+                                <i class="fa-solid fa-chart-column"></i>
+                                <h3>SHAP Local Attribution</h3>
+                                <div class="tooltip-wrapper">
+                                    <i class="fa-solid fa-circle-info tooltip-trigger"></i>
+                                    <span class="tooltip-text">SHAP values explain how much each feature contributed relative to the baseline probability. Red bars push towards High Risk, green bars push towards Low Risk.</span>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div class="shap-plot-container" id="shap-cont">
+                                    <!-- Dynamic SHAP attribution bars will be injected here -->
+                                    <div class="shap-axis-line"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tab Content: Model Analytics -->
+            <section class="tab-content" id="model-metrics-tab">
+                <div class="grid-2col">
+                    <!-- Model Comparison Chart -->
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="fa-solid fa-chart-simple"></i>
+                            <h3>Model Performance Metrics</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="chart-container">
+                                <canvas id="model-comparison-chart"></canvas>
+                            </div>
+                            <div class="metrics-grid" id="metrics-cards-container">
+                                <!-- Dynamic metrics display -->
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Retraining and Calibration -->
+                    <div class="flex-column">
+                        <div class="card">
+                            <div class="card-header">
+                                <i class="fa-solid fa-gear"></i>
+                                <h3>API Engine Calibration</h3>
+                            </div>
+                            <div class="card-body">
+                                <p class="card-text-desc">Re-run the training pipeline (strict 80/20 split) with a custom seed. The backend will evaluate Logistic Regression, SVM, and Random Forest, update the production models, and save metrics.</p>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="training-seed">Pipeline Random Seed</label>
+                                        <input type="number" id="training-seed" class="input-field" value="48" min="1" max="1000">
+                                    </div>
+                                    <button class="btn btn-primary btn-align" id="btn-retrain">
+                                        <i class="fa-solid fa-arrows-spin"></i> Trigger Retraining
+                                    </button>
+                                </div>
+                                <div class="retrain-status" id="retrain-output" style="display: none;">
+                                    <i class="fa-solid fa-circle-notch fa-spin text-accent"></i> Retraining models on backend...
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Global Feature Importance (SHAP) -->
+                        <div class="card flex-grow">
+                            <div class="card-header">
+                                <i class="fa-solid fa-globe"></i>
+                                <h3>SHAP Global Feature Importance</h3>
+                            </div>
+                            <div class="card-body">
+                                <div class="chart-container">
+                                    <canvas id="global-importance-chart"></canvas>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tab Content: RAG Search -->
+            <section class="tab-content" id="rag-search-tab">
+                <div class="card search-card-top">
+                    <div class="card-body">
+                        <div class="search-input-wrapper">
+                            <i class="fa-solid fa-magnifying-glass search-icon"></i>
+                            <input type="text" id="rag-query" placeholder="Ask a clinical question or search papers (e.g. 'deep learning models in breast cancer classification' or 'CAR-T Cell Immunotherapy')..." class="search-input">
+                            <button class="btn btn-primary" id="btn-rag-search">
+                                <i class="fa-solid fa-magnifying-glass-chart"></i> Search Corpus
+                            </button>
+                        </div>
+                        <div class="quick-tags">
+                            <span>Examples:</span>
+                            <a href="#" class="quick-tag">CNNs for breast cancer screening</a>
+                            <a href="#" class="quick-tag">liquid biopsy diagnostic utility</a>
+                            <a href="#" class="quick-tag">CRISPR-Cas9 gene editing</a>
+                            <a href="#" class="quick-tag">predicting immunotherapy response</a>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="search-results-meta" id="rag-results-info" style="display: none;">
+                    Found <span id="rag-results-count">0</span> matching segments across 500+ indexed biomedical papers in <span id="rag-results-latency">0</span> ms
+                </div>
+
+                <div class="search-results-grid" id="rag-results-container">
+                    <!-- RAG results injected here -->
+                    <div class="no-results">
+                        <i class="fa-solid fa-magnifying-glass-arrow-right"></i>
+                        <h4>Query the Medical Literature RAG Corpus</h4>
+                        <p>Search over 500+ cancer-related research papers and PDF references indexed via FAISS & Sentence Transformers.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Tab Content: Batch Inference -->
+            <section class="tab-content" id="batch-inference-tab">
+                <div class="grid-2col-73">
+                    <!-- Left: CSV Upload & Results Table -->
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="fa-solid fa-file-excel"></i>
+                            <h3>Upload Batch Data</h3>
+                        </div>
+                        <div class="card-body">
+                            <div class="upload-zone" id="csv-dropzone">
+                                <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
+                                <h4>Drag & Drop Patient CSV File</h4>
+                                <p>File should contain medical features: Cl.thickness, Cell.size, Cell.shape, Marg.adhesion, Epith.c.size, Bare.nuclei, Bl.cromatin, Normal.nucleoli, Mitoses</p>
+                                <div class="upload-actions">
+                                    <label for="csv-file-input" class="btn btn-outline">Choose File</label>
+                                    <input type="file" id="csv-file-input" accept=".csv" style="display: none;">
+                                </div>
+                            </div>
+
+                            <div class="batch-results-wrapper" id="batch-results-area" style="display: none;">
+                                <div class="batch-results-header">
+                                    <h4>Batch Prediction Results</h4>
+                                    <button class="btn btn-outline btn-sm" id="btn-download-results">
+                                        <i class="fa-solid fa-download"></i> Download CSV
+                                    </button>
+                                </div>
+                                <div class="table-container">
+                                    <table class="data-table" id="batch-table">
+                                        <thead>
+                                            <tr>
+                                                <th>Patient #</th>
+                                                <th>Risk Class</th>
+                                                <th>Confidence</th>
+                                                <th>RF Prob</th>
+                                                <th>LR Prob</th>
+                                                <th>SVM Prob</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <!-- Dynamically filled -->
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right: CSV template download / guidance -->
+                    <div class="card">
+                        <div class="card-header">
+                            <i class="fa-solid fa-circle-question"></i>
+                            <h3>Template & Schema Guide</h3>
+                        </div>
+                        <div class="card-body">
+                            <p class="card-text-desc">To run batch predictions, upload a CSV structured with the clinical features scaled between 1 and 10.</p>
+                            
+                            <a href="#" class="btn btn-outline btn-full" id="btn-download-template">
+                                <i class="fa-solid fa-file-arrow-down"></i> Download CSV Template
+                            </a>
+
+                            <div class="schema-info-list">
+                                <div class="schema-info-item">
+                                    <strong>Cl.thickness:</strong> 1 (thin) - 10 (thick)
+                                </div>
+                                <div class="schema-info-item">
+                                    <strong>Cell.size:</strong> 1 (uniform) - 10 (varied)
+                                </div>
+                                <div class="schema-info-item">
+                                    <strong>Cell.shape:</strong> 1 (uniform) - 10 (varied)
+                                </div>
+                                <div class="schema-info-item">
+                                    <strong>Marg.adhesion:</strong> 1 (normal) - 10 (high)
+                                </div>
+                                <div class="schema-info-item">
+                                    <strong>Epith.c.size:</strong> 1 (normal) - 10 (enlarged)
+                                </div>
+                                <div class="schema-info-item">
+                                    <strong>Bare.nuclei:</strong> 1 (none) - 10 (many)
+                                </div>
+                                <div class="schema-info-item">
+                                    <strong>Bl.cromatin:</strong> 1 (fine) - 10 (coarse)
+                                </div>
+                                <div class="schema-info-item">
+                                    <strong>Normal.nucleoli:</strong> 1 (normal) - 10 (prominent)
+                                </div>
+                                <div class="schema-info-item">
+                                    <strong>Mitoses:</strong> 1 (none) - 10 (highly active)
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+    
+    <script src="/static/app.js"></script>
+</body>
+</html>
