@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+.venv/
+venv/
+.env
+
+data/models/
+data/faiss_index.bin
+
+.vscode/
