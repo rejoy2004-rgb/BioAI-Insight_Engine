@@ -1,288 +1,224 @@
-import os
-import json
-import pickle
-import time
-import numpy as np
-import pandas as pd
-from fastapi import FastAPI, HTTPException
-from fastapi.staticfiles import StaticFiles
-from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
-from typing import List, Dict, Any, Optional
+"""FastAPI application: ML inference + explainability + scientific retrieval.
 
-from src.preprocessing import get_scaler, load_data
-from src.explainability import explain_instance, get_global_shap_importance
-from src.rag_engine import retrieve, load_or_build_index
-from src.ml_model import train_pipeline, MODELS_DIR
+Run:  uvicorn src.main:app --host 127.0.0.1 --port 8000
+Educational/research prototype - not a validated clinical diagnostic tool.
+"""
+from __future__ import annotations
+
+import logging
+import os
+import threading
+import time
+import uuid
+from contextlib import asynccontextmanager
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import FileResponse, JSONResponse
+from fastapi.staticfiles import StaticFiles
+
+from src import config
+from src.preprocessing import DataValidationError
+from src.rag_engine import QueryError, RagEngine
+from src.schemas import BatchPredictionRequest, BatchPredictionResponse, PatientFeatures, Prediction, QueryRequest, TrainRequest
+from src.service import ModelService, ModelUnavailable
+
+log = logging.getLogger("bioai.api")
+VERSION = "2.0.0"
+_train_lock = threading.Lock()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    logging.basicConfig(level=os.getenv("BIOAI_LOG_LEVEL", "INFO"),
+                        format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    app.state.models = ModelService()
+    app.state.rag = RagEngine()
+    app.state.models.load()
+    app.state.rag.build()
+    yield
+
 
 app = FastAPI(
-    title="BioAI Insight Engine API", 
-    description="Cancer Risk Prediction (Logistic Regression, SVM, Random Forest) with SHAP Explainability & RAG Search Engine",
-    version="1.0.0"
+    title="BioAI Insight Engine API", version=VERSION, lifespan=lifespan,
+    description="Explainable ML on the Wisconsin breast-biopsy dataset and cited retrieval over a small "
+                "scientific corpus. Educational prototype - not a clinical diagnostic tool.",
 )
 
-# Ensure static files directory exists
-os.makedirs("static", exist_ok=True)
-app.mount("/static", StaticFiles(directory="static"), name="static")
+CSP = ("default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+       "font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; "
+       "frame-ancestors 'none'; base-uri 'self'; form-action 'self'")
+# Swagger UI (/docs) loads assets from a CDN, so it gets a relaxed policy.
+DOCS_PATHS = {"/docs", "/redoc", "/openapi.json", "/docs/oauth2-redirect"}
 
-models = {}
-scaler = None
 
-def load_resources():
-    global scaler
-    print("Loading model resources...")
-    scaler = get_scaler()
-    
-    for name in ["logistic_regression", "svm", "random_forest"]:
-        path = os.path.join(MODELS_DIR, f"{name}.pkl")
-        if os.path.exists(path):
-            with open(path, "rb") as f:
-                models[name] = pickle.load(f)
-                print(f"Loaded model: {name}")
-        else:
-            print(f"Model file not found: {path}")
-            
-    # Load RAG index
-    try:
-        load_or_build_index()
-    except Exception as e:
-        print(f"Error loading RAG index: {e}")
+@app.middleware("http")
+async def request_context(request: Request, call_next):
+    rid = uuid.uuid4().hex[:12]
+    request.state.request_id = rid
+    start = time.perf_counter()
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > config.MAX_BODY_BYTES:
+        return JSONResponse({"detail": "Request body too large.", "request_id": rid}, status_code=413)
+    if request.method in {"POST", "PUT", "PATCH"} and not declared:
+        body = await request.body()
+        if len(body) > config.MAX_BODY_BYTES:
+            return JSONResponse({"detail": "Request body too large.", "request_id": rid}, status_code=413)
+    response = await call_next(request)
+    ms = (time.perf_counter() - start) * 1000
+    response.headers["X-Request-ID"] = rid
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    if request.url.path not in DOCS_PATHS:
+        response.headers["Content-Security-Policy"] = CSP
+    if request.url.path.startswith("/static/") or request.url.path == "/":
+        response.headers["Cache-Control"] = "no-cache"
+    log.info("req=%s %s %s -> %s %.0fms", rid, request.method, request.url.path, response.status_code, ms)
+    return response
 
-@app.on_event("startup")
-def startup_event():
-    load_resources()
 
-@app.get("/")
-def read_root():
-    return FileResponse("static/index.html")
+def _rid(request: Request) -> str:
+    return getattr(request.state, "request_id", "-")
 
-# Schemas
-class PatientFeatures(BaseModel):
-    Cl_thickness: float = Field(..., alias="Cl.thickness", ge=1, le=10)
-    Cell_size: float = Field(..., alias="Cell.size", ge=1, le=10)
-    Cell_shape: float = Field(..., alias="Cell.shape", ge=1, le=10)
-    Marg_adhesion: float = Field(..., alias="Marg.adhesion", ge=1, le=10)
-    Epith_c_size: float = Field(..., alias="Epith.c.size", ge=1, le=10)
-    Bare_nuclei: float = Field(..., alias="Bare.nuclei", ge=1, le=10)
-    Bl_cromatin: float = Field(..., alias="Bl.cromatin", ge=1, le=10)
-    Normal_nucleoli: float = Field(..., alias="Normal.nucleoli", ge=1, le=10)
-    Mitoses: float = Field(..., alias="Mitoses", ge=1, le=10)
 
-    model_config = {
-        "populate_by_name": True,
-        "allow_population_by_field_name": True
-    }
+@app.exception_handler(RequestValidationError)
+async def validation_handler(request: Request, exc: RequestValidationError):
+    errors = [{"field": ".".join(str(p) for p in e["loc"] if p != "body"), "message": e["msg"]} for e in exc.errors()]
+    return JSONResponse({"detail": "Invalid request.", "errors": errors, "request_id": _rid(request)}, status_code=422)
 
-class BatchPredictionRequest(BaseModel):
-    patients: List[PatientFeatures]
 
-class QueryRequest(BaseModel):
-    query: str
-    k: int = 3
+@app.exception_handler(DataValidationError)
+async def data_validation_handler(request: Request, exc: DataValidationError):
+    return JSONResponse({"detail": str(exc), "request_id": _rid(request)}, status_code=422)
 
-class TrainRequest(BaseModel):
-    seed: int = 48
 
-# Endpoints
+@app.exception_handler(ModelUnavailable)
+async def model_unavailable_handler(request: Request, exc: ModelUnavailable):
+    return JSONResponse({"detail": str(exc), "request_id": _rid(request)}, status_code=503)
+
+
+@app.exception_handler(QueryError)
+async def query_error_handler(request: Request, exc: QueryError):
+    return JSONResponse({"detail": str(exc), "request_id": _rid(request)}, status_code=422)
+
+
+@app.exception_handler(Exception)
+async def unhandled_handler(request: Request, exc: Exception):
+    log.exception("unhandled error req=%s", _rid(request))   # traceback goes to logs only
+    return JSONResponse({"detail": "Internal server error.", "request_id": _rid(request)}, status_code=500)
+
+
+def _models(request: Request) -> ModelService:
+    svc: ModelService = request.app.state.models
+    if not svc.ready:
+        raise ModelUnavailable(svc.load_error or "Models not loaded.")
+    return svc
+
+
+# ---------------------------------------------------------------- pages
+@app.get("/", include_in_schema=False)
+def index():
+    return FileResponse(config.STATIC_DIR / "index.html")
+
+
+app.mount("/static", StaticFiles(directory=config.STATIC_DIR), name="static")
+
+
+# ---------------------------------------------------------------- health
 @app.get("/health")
-def health_check():
-    global scaler
-    metrics_path = os.path.join(MODELS_DIR, "metrics.json")
-    loaded_metrics = {}
-    if os.path.exists(metrics_path):
-        try:
-            with open(metrics_path, "r") as f:
-                loaded_metrics = json.load(f)
-        except Exception as e:
-            print(f"Error loading metrics: {e}")
-            
-    from src.rag_engine import DOCUMENTS_CACHE_PATH
-    rag_doc_count = 0
-    if os.path.exists(DOCUMENTS_CACHE_PATH):
-        try:
-            with open(DOCUMENTS_CACHE_PATH, "r") as f:
-                rag_doc_count = len(json.load(f))
-        except Exception as e:
-            print(f"Error reading documents cache: {e}")
+def health():
+    """Liveness only: the process is up."""
+    return {"status": "ok", "version": VERSION}
 
-    return {
-        "status": "healthy",
-        "timestamp": time.time(),
-        "models_loaded": list(models.keys()),
-        "scaler_loaded": scaler is not None,
-        "rag_document_count": rag_doc_count,
-        "model_performance": loaded_metrics
-    }
 
-@app.post("/predict")
-def predict_risk(features: PatientFeatures):
-    if not models or scaler is None:
-        load_resources()
-        if not models or scaler is None:
-            raise HTTPException(
-                status_code=503, 
-                detail="Models or scaler not loaded. Please train the models first."
-            )
-            
-    # Extract feature values in exact sequence of train columns
-    raw_values = [
-        features.Cl_thickness,
-        features.Cell_size,
-        features.Cell_shape,
-        features.Marg_adhesion,
-        features.Epith_c_size,
-        features.Bare_nuclei,
-        features.Bl_cromatin,
-        features.Normal_nucleoli,
-        features.Mitoses
-    ]
-    
-    feature_names = [
-        "Cl.thickness", "Cell.size", "Cell.shape", "Marg.adhesion", 
-        "Epith.c.size", "Bare.nuclei", "Bl.cromatin", "Normal.nucleoli", "Mitoses"
-    ]
-    sample_df = pd.DataFrame([raw_values], columns=feature_names)
-    sample_scaled = scaler.transform(sample_df)
-    
-    predictions = {}
-    probabilities = {}
-    
-    for name, model in models.items():
-        try:
-            pred = int(model.predict(sample_scaled)[0])
-            prob = float(model.predict_proba(sample_scaled)[0][1])
-            predictions[name] = pred
-            probabilities[name] = prob
-        except Exception as e:
-            print(f"Error predicting with model {name}: {e}")
-            
-    primary_model = "random_forest"
-    if primary_model not in models:
-        primary_model = list(models.keys())[0] if models else None
-        
-    if primary_model is None:
-        raise HTTPException(status_code=500, detail="No models loaded for prediction.")
-        
-    final_pred = predictions.get(primary_model, 0)
-    final_conf = probabilities.get(primary_model, 0.0)
-    
-    # Local SHAP Explanation (Random Forest is default, falls back to Logistic Regression)
-    shap_explanation = None
-    try:
-        shap_explanation = explain_instance(sample_scaled[0], model_name=primary_model)
-        # Fallback to logistic regression explanation if RF fails
-        if shap_explanation is None and "logistic_regression" in models:
-            shap_explanation = explain_instance(sample_scaled[0], model_name="logistic_regression")
-    except Exception as e:
-        print(f"Error running local SHAP explanation: {e}")
-        
-    feature_names = [
-        "Cl.thickness", "Cell.size", "Cell.shape", "Marg.adhesion", 
-        "Epith.c.size", "Bare.nuclei", "Bl.cromatin", "Normal.nucleoli", "Mitoses"
-    ]
-    
-    shap_attributions = []
-    if shap_explanation and "shap_values" in shap_explanation:
-        for idx, name in enumerate(feature_names):
-            shap_attributions.append({
-                "feature": name,
-                "value": float(raw_values[idx]),
-                "shap_value": float(shap_explanation["shap_values"][idx])
-            })
-            
-    return {
-        "prediction": final_pred,
-        "prediction_label": "High Cancer Risk" if final_pred == 1 else "Low Cancer Risk",
-        "confidence_score": final_conf,
-        "model_probabilities": probabilities,
-        "shap_base_value": shap_explanation.get("base_value") if shap_explanation else None,
-        "shap_attributions": shap_attributions
+@app.get("/ready")
+def ready(request: Request):
+    """Readiness: required model artifacts loaded. 503 otherwise."""
+    models: ModelService = request.app.state.models
+    rag: RagEngine = request.app.state.rag
+    body = {
+        "status": "ready" if models.ready else "not_ready",
+        "version": VERSION,
+        "models_loaded": sorted(models.pipelines),
+        "primary_model": models.primary,
+        "rag_ready": rag.ready,
+        "rag_chunks": len(rag.retriever),
+        "training_enabled": config.ENABLE_TRAIN_ENDPOINT,
+        "detail": None if models.ready else models.load_error,
     }
+    return JSONResponse(body, status_code=200 if models.ready else 503)
 
-@app.post("/predict/batch")
-def predict_risk_batch(request: BatchPredictionRequest):
-    if not models or scaler is None:
-        load_resources()
-        if not models or scaler is None:
-            raise HTTPException(status_code=503, detail="Models or scaler not available.")
-            
-    results = []
-    
-    for features in request.patients:
-        raw_values = [
-            features.Cl_thickness,
-            features.Cell_size,
-            features.Cell_shape,
-            features.Marg_adhesion,
-            features.Epith_c_size,
-            features.Bare_nuclei,
-            features.Bl_cromatin,
-            features.Normal_nucleoli,
-            features.Mitoses
-        ]
-        
-        feature_names = [
-            "Cl.thickness", "Cell.size", "Cell.shape", "Marg.adhesion", 
-            "Epith.c.size", "Bare.nuclei", "Bl.cromatin", "Normal.nucleoli", "Mitoses"
-        ]
-        sample_df = pd.DataFrame([raw_values], columns=feature_names)
-        sample_scaled = scaler.transform(sample_df)
-        
-        probabilities = {}
-        for name, model in models.items():
-            try:
-                probabilities[name] = float(model.predict_proba(sample_scaled)[0][1])
-            except Exception as e:
-                probabilities[name] = 0.0
-                
-        rf_prob = probabilities.get("random_forest", 0.0)
-        pred = 1 if rf_prob >= 0.5 else 0
-        
-        results.append({
-            "prediction": pred,
-            "prediction_label": "High Cancer Risk" if pred == 1 else "Low Cancer Risk",
-            "confidence_score": rf_prob,
-            "model_probabilities": probabilities
-        })
-        
-    return {
-        "total_records": len(results),
-        "predictions": results
-    }
+
+# ---------------------------------------------------------------- ML
+@app.post("/predict", response_model=Prediction)
+def predict(features: PatientFeatures, request: Request):
+    svc = _models(request)
+    t0 = time.perf_counter()
+    result = svc.predict([features.as_row()], explain=True)[0]
+    log.info("predict req=%s model=%s %.0fms", _rid(request), svc.primary, (time.perf_counter() - t0) * 1000)
+    return result
+
+
+@app.post("/predict/batch", response_model=BatchPredictionResponse)
+def predict_batch(body: BatchPredictionRequest, request: Request):
+    svc = _models(request)
+    preds = svc.predict([p.as_row() for p in body.patients], explain=False)
+    return {"total_records": len(preds), "predictions": preds}
+
+
+@app.get("/model/metrics")
+def model_metrics(request: Request):
+    return _models(request).public_metrics()
+
 
 @app.get("/explain/global")
-def get_global_explanations(model_name: str = "random_forest"):
-    try:
-        importances = get_global_shap_importance(model_name)
-        if importances is None:
-            raise HTTPException(status_code=404, detail=f"Global explanations not available for model '{model_name}'.")
-        return importances
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+def explain_global(request: Request, model_name: str | None = None):
+    svc = _models(request)
+    name = model_name or svc.primary
+    imp = svc.metadata.get("global_importance", {}).get(name)
+    if imp is None:
+        raise HTTPException(status_code=404, detail=f"Global explanations are not available for model '{name}'.")
+    return {"model": name, **imp,
+            "note": "Mean |SHAP| describes model behaviour on the training data, not biological causality."}
 
+
+# ---------------------------------------------------------------- RAG
 @app.post("/rag/retrieve")
-def retrieve_papers(request: QueryRequest):
-    start_time = time.time()
-    try:
-        results = retrieve(request.query, request.k)
-        latency_ms = (time.time() - start_time) * 1000
-        return {
-            "query": request.query,
-            "latency_ms": latency_ms,
-            "results": results
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+def rag_retrieve(body: QueryRequest, request: Request):
+    rag: RagEngine = request.app.state.rag
+    t0 = time.perf_counter()
+    results = rag.retrieve(body.query, body.k)
+    ms = (time.perf_counter() - t0) * 1000
+    log.info("rag.retrieve req=%s n=%d %.0fms", _rid(request), len(results), ms)
+    return {"latency_ms": round(ms, 2), "count": len(results), "results": results}
 
-@app.post("/train")
-def train_model_endpoint(request: TrainRequest):
-    try:
-        metrics = train_pipeline(seed=request.seed)
-        load_resources()
-        return {
-            "message": "Model training pipeline completed successfully.",
-            "seed_used": request.seed,
-            "metrics": metrics
-        }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/rag/ask")
+def rag_ask(body: QueryRequest, request: Request):
+    rag: RagEngine = request.app.state.rag
+    t0 = time.perf_counter()
+    out = rag.ask(body.query, body.k)
+    out["latency_ms"] = round((time.perf_counter() - t0) * 1000, 2)
+    log.info("rag.ask req=%s status=%s %.0fms", _rid(request), out["status"], out["latency_ms"])
+    return out
+
+
+@app.get("/rag/stats")
+def rag_stats(request: Request):
+    return request.app.state.rag.stats()
+
+
+# ---------------------------------------------------------------- training (opt-in)
+if config.ENABLE_TRAIN_ENDPOINT:
+    @app.post("/train")
+    def train(body: TrainRequest, request: Request):
+        """Disabled unless BIOAI_ENABLE_TRAIN_ENDPOINT=1. Unauthenticated: local demos only."""
+        from src.ml_model import train_pipeline
+        if not _train_lock.acquire(blocking=False):
+            raise HTTPException(status_code=409, detail="Training already in progress.")
+        try:
+            md = train_pipeline(seed=body.seed)
+            request.app.state.models.load()
+        finally:
+            _train_lock.release()
+        return {"message": "Training completed.", "seed": body.seed, "primary_model": md["primary_model"]}

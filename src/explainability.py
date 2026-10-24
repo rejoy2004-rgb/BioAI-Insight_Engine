@@ -1,143 +1,127 @@
-import os
-import pickle
+"""SHAP explanations for the fitted scikit-learn pipelines.
+
+SHAP describes how the *model* arrives at its output, not biological causation.
+Supported: Random Forest (TreeExplainer; contributions in score/probability
+units) and Logistic Regression (LinearExplainer; contributions in log-odds).
+Other models (SVM, baseline) are reported as unsupported rather than faked.
+"""
+from __future__ import annotations
+
+import logging
+
 import numpy as np
-import shap
+import pandas as pd
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.linear_model import LogisticRegression
 
-MODELS_DIR = "data/models"
+from src.preprocessing import FEATURES
 
-def get_shap_explainer(model_name="random_forest"):
-    model_path = os.path.join(MODELS_DIR, f"{model_name}.pkl")
-    if not os.path.exists(model_path):
-        return None
-    with open(model_path, "rb") as f:
-        model = pickle.load(f)
-    
-    if model_name == "random_forest":
-        explainer = shap.TreeExplainer(model)
-        return explainer
-    return None
+log = logging.getLogger("bioai.explain")
 
-def explain_instance(sample_scaled, model_name="random_forest"):
+
+class ExplanationUnavailable(RuntimeError):
+    pass
+
+
+def _clf(pipeline):
+    return pipeline.named_steps["clf"]
+
+
+def supports_shap(pipeline) -> bool:
+    return isinstance(_clf(pipeline), (RandomForestClassifier, LogisticRegression))
+
+
+def units_for(pipeline) -> str:
+    return "log-odds" if isinstance(_clf(pipeline), LogisticRegression) else "model score (probability-like)"
+
+
+def normalize_shap_values(values, n_features: int, positive_class: int = 1) -> np.ndarray:
+    """Return a (n_samples, n_features) array for the positive class.
+
+    Handles the shapes different SHAP versions/explainers produce:
+      * list of per-class arrays                     [(n, f), (n, f)]
+      * 3-D array (n, f, n_classes)
+      * 2-D array (n, f)         (already single output)
+      * 1-D array (f,)           (single sample)
     """
-    Computes local SHAP explanation for a single sample (scaled).
-    Returns base_value, shap_values.
-    """
-    model_path = os.path.join(MODELS_DIR, f"{model_name}.pkl")
-    if not os.path.exists(model_path):
-        return None
-        
-    with open(model_path, "rb") as f:
-        model = pickle.load(f)
-        
-    if model_name == "random_forest":
-        explainer = shap.TreeExplainer(model)
-        if len(sample_scaled.shape) == 1:
-            sample_scaled = sample_scaled.reshape(1, -1)
-            
-        shap_vals = explainer.shap_values(sample_scaled)
-        
-        # handle list (binary/multi-class outputs)
-        if isinstance(shap_vals, list):
-            # shap_vals[1] corresponds to class 1
-            local_shap = shap_vals[1][0]
-            base_val = explainer.expected_value[1]
-        elif len(shap_vals.shape) == 3:
-            local_shap = shap_vals[0, :, 1]
-            base_val = explainer.expected_value[1]
+    if isinstance(values, list):
+        if len(values) == 1:
+            values = values[0]
+        elif positive_class < len(values):
+            values = values[positive_class]
         else:
-            local_shap = shap_vals[0]
-            base_val = explainer.expected_value
-            if isinstance(base_val, np.ndarray) and len(base_val) > 1:
-                base_val = base_val[1]
-                
+            raise ExplanationUnavailable("Unexpected SHAP output: class index out of range.")
+    arr = np.asarray(values, dtype=float)
+    if arr.ndim == 3:
+        if arr.shape[1] != n_features:
+            raise ExplanationUnavailable(f"Unexpected SHAP output shape {arr.shape}.")
+        arr = arr[:, :, positive_class if arr.shape[2] > positive_class else 0]
+    elif arr.ndim == 1:
+        arr = arr.reshape(1, -1)
+    if arr.ndim != 2 or arr.shape[1] != n_features:
+        raise ExplanationUnavailable(f"Unexpected SHAP output shape {arr.shape}.")
+    if not np.isfinite(arr).all():
+        raise ExplanationUnavailable("SHAP produced non-finite values.")
+    return arr
+
+
+def normalize_base_value(expected, positive_class: int = 1) -> float:
+    arr = np.atleast_1d(np.asarray(expected, dtype=float)).ravel()
+    val = arr[positive_class] if arr.size > positive_class else arr[0]
+    if not np.isfinite(val):
+        raise ExplanationUnavailable("Non-finite SHAP base value.")
+    return float(val)
+
+
+class Explainer:
+    """Wraps a fitted pipeline; construct once, reuse across requests."""
+
+    def __init__(self, pipeline, background_raw: pd.DataFrame | None = None):
+        import shap  # imported lazily so the API still serves predictions without SHAP
+        if not supports_shap(pipeline):
+            raise ExplanationUnavailable("SHAP is not supported for this model type.")
+        self.pipeline = pipeline
+        self.prep = pipeline[:-1]
+        self.units = units_for(pipeline)
+        clf = _clf(pipeline)
+        try:
+            if isinstance(clf, RandomForestClassifier):
+                self._explainer = shap.TreeExplainer(clf)
+            else:
+                if background_raw is None:
+                    raise ExplanationUnavailable("Linear SHAP needs a background sample.")
+                bg = self.prep.transform(background_raw[FEATURES])
+                self._explainer = shap.LinearExplainer(clf, bg)
+            self.base_value = normalize_base_value(self._explainer.expected_value)
+        except ExplanationUnavailable:
+            raise
+        except Exception as exc:  # shap raises many exception types across versions
+            raise ExplanationUnavailable(f"Could not build SHAP explainer: {type(exc).__name__}") from exc
+
+    def shap_values(self, X_raw: pd.DataFrame) -> np.ndarray:
+        Xt = self.prep.transform(X_raw[FEATURES])
+        try:
+            raw = self._explainer.shap_values(Xt)
+        except Exception as exc:
+            raise ExplanationUnavailable(f"SHAP computation failed: {type(exc).__name__}") from exc
+        return normalize_shap_values(raw, len(FEATURES))
+
+    def explain_one(self, X_raw: pd.DataFrame) -> dict:
+        sv = self.shap_values(X_raw.iloc[[0]])[0]
+        row = X_raw.iloc[0]
         return {
-            "base_value": float(base_val),
-            "shap_values": [float(v) for v in local_shap]
+            "method": "TreeExplainer" if isinstance(_clf(self.pipeline), RandomForestClassifier) else "LinearExplainer",
+            "units": self.units,
+            "base_value": self.base_value,
+            "attributions": [{"feature": f, "value": float(row[f]), "shap_value": float(v)}
+                             for f, v in zip(FEATURES, sv)],
         }
-    elif model_name == "logistic_regression":
-        # Linear SHAP explainer for Logistic Regression
-        # We can simulate or use simpler linear explanations: SHAP values = coef * (x - mean)
-        # Let's use shap.LinearExplainer
-        # We need a background dataset, or we can use the model directly
-        try:
-            from src.preprocessing import load_data, get_scaler
-            data = load_data()
-            X = data.drop("Class", axis=1)
-            scaler = get_scaler()
-            X_scaled = scaler.transform(X)
-            
-            explainer = shap.LinearExplainer(model, X_scaled)
-            if len(sample_scaled.shape) == 1:
-                sample_scaled = sample_scaled.reshape(1, -1)
-            shap_vals = explainer.shap_values(sample_scaled)
-            
-            # LinearExplainer returns array of shape (num_samples, num_features)
-            local_shap = shap_vals[0]
-            base_val = explainer.expected_value
-            
-            return {
-                "base_value": float(base_val),
-                "shap_values": [float(v) for v in local_shap]
-            }
-        except Exception as e:
-            print(f"Error in Logistic Regression SHAP: {e}")
-            
-    # Default fallback: return zero attributions if explainer fails or model is SVM
-    # Since SVM uses RBF kernel, calculating SHAP values dynamically is extremely slow (KernelExplainer).
-    # We will return standard linear/random feature attribution or return a message.
-    # To keep latency <120ms, we will indicate that RF is the primary explainable model.
-    return None
 
-def get_global_shap_importance(model_name="random_forest"):
-    """
-    Returns the mean absolute SHAP value for each feature.
-    """
-    from src.preprocessing import load_data, get_scaler
-    data = load_data()
-    X = data.drop("Class", axis=1)
-    
-    scaler = get_scaler()
-    if scaler is None:
-        return None
-        
-    X_scaled = scaler.transform(X)
-    
-    model_path = os.path.join(MODELS_DIR, f"{model_name}.pkl")
-    if not os.path.exists(model_path):
-        return None
-        
-    with open(model_path, "rb") as f:
-        model = pickle.load(f)
-        
-    if model_name == "random_forest":
-        explainer = shap.TreeExplainer(model)
-        shap_vals = explainer.shap_values(X_scaled)
-        
-        if isinstance(shap_vals, list):
-            class1_shap = shap_vals[1]
-        elif len(shap_vals.shape) == 3:
-            class1_shap = shap_vals[:, :, 1]
-        else:
-            class1_shap = shap_vals
-            
-        mean_abs_shap = np.abs(class1_shap).mean(axis=0)
-        
-        features = list(X.columns)
-        importance = {features[i]: float(mean_abs_shap[i]) for i in range(len(features))}
-        
-        sorted_importance = dict(sorted(importance.items(), key=lambda item: item[1], reverse=True))
-        return sorted_importance
-    elif model_name == "logistic_regression":
-        try:
-            explainer = shap.LinearExplainer(model, X_scaled)
-            shap_vals = explainer.shap_values(X_scaled)
-            mean_abs_shap = np.abs(shap_vals).mean(axis=0)
-            
-            features = list(X.columns)
-            importance = {features[i]: float(mean_abs_shap[i]) for i in range(len(features))}
-            sorted_importance = dict(sorted(importance.items(), key=lambda item: item[1], reverse=True))
-            return sorted_importance
-        except Exception as e:
-            print(f"Error in Global Logistic Regression SHAP: {e}")
-            
-    return None
+
+def compute_global_importance(pipeline, X_raw: pd.DataFrame, background_raw=None) -> dict:
+    """Mean |SHAP| per feature over X_raw (training data), sorted descending."""
+    ex = Explainer(pipeline, background_raw)
+    mean_abs = np.abs(ex.shap_values(X_raw)).mean(axis=0)
+    ordered = sorted(zip(FEATURES, mean_abs), key=lambda kv: -kv[1])
+    return {"units": ex.units, "computed_on": "training partition",
+            "importance": {f: float(v) for f, v in ordered}}

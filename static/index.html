@@ -3,430 +3,279 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>BioAI Insight Engine - Cancer Risk Diagnostics & RAG Search</title>
-    <!-- Google Fonts -->
+    <meta name="description" content="Explainable healthcare ML and cited scientific-evidence retrieval. Educational prototype, not a clinical tool.">
+    <title>BioAI Insight Engine</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <!-- Font Awesome Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/vendor/fontawesome/css/all.min.css">
     <link rel="stylesheet" href="/static/style.css">
+    <script src="/static/vendor/chart.umd.min.js" defer></script>
+    <script src="/static/app.js" defer></script>
 </head>
 <body>
+    <a class="skip-link" href="#main">Skip to content</a>
     <div class="app-container">
-        <!-- Sidebar Navigation -->
         <aside class="sidebar">
             <div class="logo-area">
-                <i class="fa-solid fa-microscope logo-icon"></i>
+                <i class="fa-solid fa-microscope logo-icon" aria-hidden="true"></i>
                 <div class="logo-text">
                     <h1>BioAI Insight</h1>
-                    <span>ENGINE v1.0</span>
+                    <span>Healthcare ML &amp; Evidence</span>
                 </div>
             </div>
-            <nav class="nav-menu">
-                <a href="#" class="nav-item active" data-tab="patient-predict">
-                    <i class="fa-solid fa-user-doctor"></i>
-                    <span>Patient Diagnostics</span>
-                </a>
-                <a href="#" class="nav-item" data-tab="model-metrics">
-                    <i class="fa-solid fa-chart-line"></i>
-                    <span>Model Analytics</span>
-                </a>
-                <a href="#" class="nav-item" data-tab="rag-search">
-                    <i class="fa-solid fa-magnifying-glass-chart"></i>
-                    <span>Literature RAG</span>
-                </a>
-                <a href="#" class="nav-item" data-tab="batch-inference">
-                    <i class="fa-solid fa-file-csv"></i>
-                    <span>Batch Prediction</span>
-                </a>
-            </nav>
-            <div class="sidebar-footer">
-                <div class="status-indicator">
-                    <span class="status-dot online"></span>
-                    <span id="api-status-text">API Online</span>
+            <nav class="nav-menu" aria-label="Sections">
+                <div role="tablist" aria-orientation="vertical" class="nav-tablist">
+                    <button type="button" role="tab" class="nav-item active" id="tab-btn-patient-predict" data-tab="patient-predict" aria-selected="true" aria-controls="patient-predict-tab">
+                        <i class="fa-solid fa-vial" aria-hidden="true"></i><span>Biopsy Classifier</span>
+                    </button>
+                    <button type="button" role="tab" class="nav-item" id="tab-btn-model-metrics" data-tab="model-metrics" aria-selected="false" aria-controls="model-metrics-tab" tabindex="-1">
+                        <i class="fa-solid fa-chart-line" aria-hidden="true"></i><span>Model Evaluation</span>
+                    </button>
+                    <button type="button" role="tab" class="nav-item" id="tab-btn-rag-search" data-tab="rag-search" aria-selected="false" aria-controls="rag-search-tab" tabindex="-1">
+                        <i class="fa-solid fa-book-open" aria-hidden="true"></i><span>Scientific Evidence</span>
+                    </button>
+                    <button type="button" role="tab" class="nav-item" id="tab-btn-batch-inference" data-tab="batch-inference" aria-selected="false" aria-controls="batch-inference-tab" tabindex="-1">
+                        <i class="fa-solid fa-file-csv" aria-hidden="true"></i><span>Batch CSV</span>
+                    </button>
                 </div>
-                <div class="latency-badge" id="api-latency">-- ms latency</div>
+            </nav>
+            <div class="sidebar-footer" role="status" aria-live="polite">
+                <div class="status-indicator">
+                    <span class="status-dot offline" id="status-dot"></span>
+                    <span id="api-status-text">Checking API…</span>
+                </div>
+                <div class="latency-badge" id="api-latency">-- ms</div>
             </div>
         </aside>
 
-        <!-- Main Content Panel -->
-        <main class="main-content">
-            <!-- Top Dashboard Header -->
+        <main class="main-content" id="main">
+            <div class="disclaimer" role="note">
+                <i class="fa-solid fa-triangle-exclamation" aria-hidden="true"></i>
+                <p><strong>Educational / research prototype &mdash; not a validated clinical diagnostic tool.</strong>
+                Outputs must not be used for medical decisions. Model trained on the public Wisconsin breast-biopsy dataset (benign vs malignant cytology scores).</p>
+            </div>
+
             <header class="dashboard-header">
                 <div class="header-title">
-                    <h2 id="current-tab-title">Patient Diagnostics Dashboard</h2>
-                    <p>Clinical breast cancer risk classification with SHAP local explainability and feature attributions.</p>
+                    <h2 id="current-tab-title">Biopsy Classifier with Explanations</h2>
+                    <p id="current-tab-desc">Classify a fine-needle-aspirate cytology profile and see which inputs drove the model's score.</p>
                 </div>
                 <div class="header-actions">
-                    <a href="/docs" target="_blank" class="btn btn-outline">
-                        <i class="fa-solid fa-book-open-reader"></i> Swagger API Docs
+                    <a href="/docs" target="_blank" rel="noopener" class="btn btn-outline">
+                        <i class="fa-solid fa-book-open-reader" aria-hidden="true"></i> API docs
                     </a>
                 </div>
             </header>
 
-            <!-- Tab Content: Patient Predict -->
-            <section class="tab-content active" id="patient-predict-tab">
+            <div class="banner banner-error" id="api-banner" role="alert" hidden></div>
+
+            <!-- Tab 1 -->
+            <section class="tab-content active" id="patient-predict-tab" role="tabpanel" aria-labelledby="tab-btn-patient-predict">
                 <div class="grid-2col">
-                    <!-- Left: Clinical Features Sliders -->
                     <div class="card">
                         <div class="card-header">
-                            <i class="fa-solid fa-sliders"></i>
-                            <h3>Patient Clinical Inputs</h3>
+                            <i class="fa-solid fa-sliders" aria-hidden="true"></i>
+                            <h3>Cytology scores (1&ndash;10)</h3>
                         </div>
                         <div class="card-body">
-                            <form id="predict-form" class="feature-form">
-                                <div class="slider-group">
-                                    <div class="slider-header">
-                                        <label for="cl_thickness">Clump Thickness</label>
-                                        <span class="slider-val" id="val-cl_thickness">5</span>
-                                    </div>
-                                    <input type="range" id="cl_thickness" name="Cl.thickness" min="1" max="10" value="5" class="range-slider">
-                                    <p class="slider-desc">Assess cell grouping density and layer arrangement (1-10).</p>
-                                </div>
-
-                                <div class="slider-group">
-                                    <div class="slider-header">
-                                        <label for="cell_size">Uniformity of Cell Size</label>
-                                        <span class="slider-val" id="val-cell_size">3</span>
-                                    </div>
-                                    <input type="range" id="cell_size" name="Cell.size" min="1" max="10" value="3" class="range-slider">
-                                    <p class="slider-desc">Measures consistency in volume among cancer cells (1-10).</p>
-                                </div>
-
-                                <div class="slider-group">
-                                    <div class="slider-header">
-                                        <label for="cell_shape">Uniformity of Cell Shape</label>
-                                        <span class="slider-val" id="val-cell_shape">3</span>
-                                    </div>
-                                    <input type="range" id="cell_shape" name="Cell.shape" min="1" max="10" value="3" class="range-slider">
-                                    <p class="slider-desc">Measures variability in shape outline of tumor cells (1-10).</p>
-                                </div>
-
-                                <div class="slider-group">
-                                    <div class="slider-header">
-                                        <label for="marg_adhesion">Marginal Adhesion</label>
-                                        <span class="slider-val" id="val-marg_adhesion">1</span>
-                                    </div>
-                                    <input type="range" id="marg_adhesion" name="Marg.adhesion" min="1" max="10" value="1" class="range-slider">
-                                    <p class="slider-desc">Degree of cell sticking; normal cells tend to adhere together (1-10).</p>
-                                </div>
-
-                                <div class="slider-group">
-                                    <div class="slider-header">
-                                        <label for="epith_c_size">Single Epithelial Cell Size</label>
-                                        <span class="slider-val" id="val-epith_c_size">2</span>
-                                    </div>
-                                    <input type="range" id="epith_c_size" name="Epith.c.size" min="1" max="10" value="2" class="range-slider">
-                                    <p class="slider-desc">Enlarged epithelial cells can indicate pre-cancerous mutations (1-10).</p>
-                                </div>
-
-                                <div class="slider-group">
-                                    <div class="slider-header">
-                                        <label for="bare_nuclei">Bare Nuclei</label>
-                                        <span class="slider-val" id="val-bare_nuclei">1</span>
-                                    </div>
-                                    <input type="range" id="bare_nuclei" name="Bare.nuclei" min="1" max="10" value="1" class="range-slider">
-                                    <p class="slider-desc">Nuclei not surrounded by cytoplasm (common in malignant samples) (1-10).</p>
-                                </div>
-
-                                <div class="slider-group">
-                                    <div class="slider-header">
-                                        <label for="bl_cromatin">Bland Chromatin</label>
-                                        <span class="slider-val" id="val-bl_cromatin">3</span>
-                                    </div>
-                                    <input type="range" id="bl_cromatin" name="Bl.cromatin" min="1" max="10" value="3" class="range-slider">
-                                    <p class="slider-desc">Uniformity of nuclear texture; cancer cells have coarser chromatin (1-10).</p>
-                                </div>
-
-                                <div class="slider-group">
-                                    <div class="slider-header">
-                                        <label for="normal_nucleoli">Normal Nucleoli</label>
-                                        <span class="slider-val" id="val-normal_nucleoli">1</span>
-                                    </div>
-                                    <input type="range" id="normal_nucleoli" name="Normal.nucleoli" min="1" max="10" value="1" class="range-slider">
-                                    <p class="slider-desc">Identifies small structures inside nucleus; prominent in malignant cells (1-10).</p>
-                                </div>
-
-                                <div class="slider-group">
-                                    <div class="slider-header">
-                                        <label for="mitoses">Mitoses</label>
-                                        <span class="slider-val" id="val-mitoses">1</span>
-                                    </div>
-                                    <input type="range" id="mitoses" name="Mitoses" min="1" max="10" value="1" class="range-slider">
-                                    <p class="slider-desc">Rate of active cell division (higher rates are more dangerous) (1-10).</p>
-                                </div>
-                            </form>
+                            <form id="predict-form" class="feature-form" novalidate></form>
+                            <div class="form-actions">
+                                <button type="button" class="btn btn-outline btn-sm" id="btn-example-benign">Load benign-like example</button>
+                                <button type="button" class="btn btn-outline btn-sm" id="btn-example-malignant">Load malignant-like example</button>
+                            </div>
                         </div>
                     </div>
 
-                    <!-- Right: Prediction Results & Local SHAP Explainability -->
                     <div class="flex-column">
                         <div class="card result-card">
                             <div class="card-header">
-                                <i class="fa-solid fa-stethoscope"></i>
-                                <h3>Prediction Diagnostics</h3>
+                                <i class="fa-solid fa-stethoscope" aria-hidden="true"></i>
+                                <h3>Model output</h3>
                             </div>
-                            <div class="card-body centered-results">
+                            <div class="card-body centered-results" aria-live="polite" id="prediction-live">
                                 <div class="result-visualization">
-                                    <!-- Radial Confidence Meter -->
-                                    <div class="progress-gauge">
-                                        <svg class="gauge-svg" viewBox="0 0 120 120">
+                                    <div class="progress-gauge" role="img" id="gauge-img" aria-label="Model score gauge">
+                                        <svg class="gauge-svg" viewBox="0 0 120 120" aria-hidden="true">
                                             <circle class="gauge-bg" cx="60" cy="60" r="50"></circle>
                                             <circle class="gauge-fill" id="gauge-stroke" cx="60" cy="60" r="50" stroke-dasharray="314.16" stroke-dashoffset="314.16"></circle>
                                         </svg>
                                         <div class="gauge-center">
-                                            <span id="result-probability">0.0%</span>
-                                            <small>Confidence</small>
+                                            <span id="result-probability">--</span>
+                                            <small>Model score</small>
                                         </div>
                                     </div>
-
                                     <div class="result-info">
-                                        <div class="badge" id="risk-badge">Low Risk</div>
-                                        <p id="risk-explanation">Predicting low cancer probability based on standard values.</p>
+                                        <div class="badge" id="risk-badge">Waiting…</div>
+                                        <p id="risk-explanation">Adjust the scores to run the model.</p>
                                     </div>
                                 </div>
-                                
-                                <div class="model-probabilities-breakdown">
-                                    <div class="model-prob-item">
-                                        <span>Random Forest</span>
-                                        <div class="prob-bar-container">
-                                            <div class="prob-bar-fill" id="model-rf-bar" style="width: 0%"></div>
-                                        </div>
-                                        <span class="prob-num" id="model-rf-val">0.0%</span>
-                                    </div>
-                                    <div class="model-prob-item">
-                                        <span>Logistic Reg</span>
-                                        <div class="prob-bar-container">
-                                            <div class="prob-bar-fill" id="model-lr-bar" style="width: 0%"></div>
-                                        </div>
-                                        <span class="prob-num" id="model-lr-val">0.0%</span>
-                                    </div>
-                                    <div class="model-prob-item">
-                                        <span>SVM (RBF Kernel)</span>
-                                        <div class="prob-bar-container">
-                                            <div class="prob-bar-fill" id="model-svm-bar" style="width: 0%"></div>
-                                        </div>
-                                        <span class="prob-num" id="model-svm-val">0.0%</span>
-                                    </div>
-                                </div>
+                                <p class="fineprint" id="score-note">The score is an <strong>uncalibrated</strong> classifier output in [0,1], not a validated probability of malignancy.</p>
+                                <div class="model-probabilities-breakdown" id="model-scores"></div>
                             </div>
                         </div>
 
-                        <!-- Local Explainability (SHAP attributions) -->
                         <div class="card explain-card flex-grow">
                             <div class="card-header">
-                                <i class="fa-solid fa-chart-column"></i>
-                                <h3>SHAP Local Attribution</h3>
-                                <div class="tooltip-wrapper">
-                                    <i class="fa-solid fa-circle-info tooltip-trigger"></i>
-                                    <span class="tooltip-text">SHAP values explain how much each feature contributed relative to the baseline probability. Red bars push towards High Risk, green bars push towards Low Risk.</span>
-                                </div>
+                                <i class="fa-solid fa-chart-column" aria-hidden="true"></i>
+                                <h3>Why this score? (SHAP)</h3>
                             </div>
                             <div class="card-body">
-                                <div class="shap-plot-container" id="shap-cont">
-                                    <!-- Dynamic SHAP attribution bars will be injected here -->
-                                    <div class="shap-axis-line"></div>
-                                </div>
+                                <p class="fineprint" id="shap-units">SHAP shows how each input moved the model's output away from its baseline. It explains model behaviour, not biological causes.</p>
+                                <div class="shap-plot-container" id="shap-cont"></div>
                             </div>
                         </div>
                     </div>
                 </div>
             </section>
 
-            <!-- Tab Content: Model Analytics -->
-            <section class="tab-content" id="model-metrics-tab">
+            <!-- Tab 2 -->
+            <section class="tab-content" id="model-metrics-tab" role="tabpanel" aria-labelledby="tab-btn-model-metrics" hidden>
+                <div class="banner" id="metrics-status" role="status">Loading evaluation results…</div>
                 <div class="grid-2col">
-                    <!-- Model Comparison Chart -->
                     <div class="card">
-                        <div class="card-header">
-                            <i class="fa-solid fa-chart-simple"></i>
-                            <h3>Model Performance Metrics</h3>
-                        </div>
+                        <div class="card-header"><i class="fa-solid fa-database" aria-hidden="true"></i><h3>Dataset summary</h3></div>
+                        <div class="card-body" id="dataset-summary"></div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header"><i class="fa-solid fa-flask" aria-hidden="true"></i><h3>Held-out test results</h3></div>
                         <div class="card-body">
-                            <div class="chart-container">
-                                <canvas id="model-comparison-chart"></canvas>
+                            <p class="fineprint" id="eval-note"></p>
+                            <div class="table-container">
+                                <table class="data-table" id="metrics-table">
+                                    <caption class="sr-only">Cross-validation and held-out test metrics per model</caption>
+                                    <thead><tr><th scope="col">Model</th><th scope="col">CV ROC-AUC</th><th scope="col">Test ROC-AUC</th><th scope="col">Sensitivity</th><th scope="col">Specificity</th><th scope="col">Precision</th><th scope="col">PR-AUC</th></tr></thead>
+                                    <tbody></tbody>
+                                </table>
                             </div>
-                            <div class="metrics-grid" id="metrics-cards-container">
-                                <!-- Dynamic metrics display -->
+                            <p class="fineprint" id="selection-note"></p>
+                        </div>
+                    </div>
+                </div>
+                <div class="grid-2col">
+                    <div class="card">
+                        <div class="card-header"><i class="fa-solid fa-chart-area" aria-hidden="true"></i><h3>ROC curve (test)</h3></div>
+                        <div class="card-body"><div class="chart-container"><canvas id="roc-chart" role="img" aria-label="ROC curves on the held-out test set"></canvas></div></div>
+                    </div>
+                    <div class="card">
+                        <div class="card-header"><i class="fa-solid fa-chart-area" aria-hidden="true"></i><h3>Precision&ndash;recall curve (test)</h3></div>
+                        <div class="card-body"><div class="chart-container"><canvas id="pr-chart" role="img" aria-label="Precision-recall curves on the held-out test set"></canvas></div></div>
+                    </div>
+                </div>
+                <div class="grid-2col">
+                    <div class="card">
+                        <div class="card-header"><i class="fa-solid fa-table-cells" aria-hidden="true"></i><h3>Primary model: confusion matrix &amp; threshold</h3></div>
+                        <div class="card-body">
+                            <div id="confusion" class="confusion"></div>
+                            <p class="fineprint" id="threshold-note"></p>
+                            <div class="table-container">
+                                <table class="data-table" id="threshold-table">
+                                    <caption class="sr-only">Sensitivity and specificity at different decision thresholds</caption>
+                                    <thead><tr><th scope="col">Threshold</th><th scope="col">Sensitivity</th><th scope="col">Specificity</th><th scope="col">Missed malignant</th><th scope="col">False alarms</th></tr></thead>
+                                    <tbody></tbody>
+                                </table>
                             </div>
                         </div>
                     </div>
-
-                    <!-- Retraining and Calibration -->
                     <div class="flex-column">
                         <div class="card">
-                            <div class="card-header">
-                                <i class="fa-solid fa-gear"></i>
-                                <h3>API Engine Calibration</h3>
-                            </div>
+                            <div class="card-header"><i class="fa-solid fa-globe" aria-hidden="true"></i><h3>Global feature importance (SHAP)</h3></div>
                             <div class="card-body">
-                                <p class="card-text-desc">Re-run the training pipeline (strict 80/20 split) with a custom seed. The backend will evaluate Logistic Regression, SVM, and Random Forest, update the production models, and save metrics.</p>
+                                <p class="fineprint" id="global-note"></p>
+                                <div class="chart-container"><canvas id="global-importance-chart" role="img" aria-label="Mean absolute SHAP value per feature"></canvas></div>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <div class="card-header"><i class="fa-solid fa-scale-balanced" aria-hidden="true"></i><h3>Score reliability (primary model)</h3></div>
+                            <div class="card-body">
+                                <p class="fineprint">Observed malignant rate per score bin on the test set. Close agreement would support calling scores probabilities; with this few samples it cannot be established.</p>
+                                <div class="table-container"><table class="data-table" id="reliability-table"><caption class="sr-only">Reliability bins</caption><thead><tr><th scope="col">Score bin</th><th scope="col">n</th><th scope="col">Mean score</th><th scope="col">Observed rate</th></tr></thead><tbody></tbody></table></div>
+                            </div>
+                        </div>
+                        <div class="card" id="retrain-card" hidden>
+                            <div class="card-header"><i class="fa-solid fa-gear" aria-hidden="true"></i><h3>Retrain (local demo only)</h3></div>
+                            <div class="card-body">
                                 <div class="form-row">
                                     <div class="form-group">
-                                        <label for="training-seed">Pipeline Random Seed</label>
-                                        <input type="number" id="training-seed" class="input-field" value="48" min="1" max="1000">
+                                        <label for="training-seed">Random seed</label>
+                                        <input type="number" id="training-seed" class="input-field" value="48" min="1" max="100000">
                                     </div>
-                                    <button class="btn btn-primary btn-align" id="btn-retrain">
-                                        <i class="fa-solid fa-arrows-spin"></i> Trigger Retraining
-                                    </button>
+                                    <button type="button" class="btn btn-primary btn-align" id="btn-retrain"><i class="fa-solid fa-arrows-spin" aria-hidden="true"></i> Retrain</button>
                                 </div>
-                                <div class="retrain-status" id="retrain-output" style="display: none;">
-                                    <i class="fa-solid fa-circle-notch fa-spin text-accent"></i> Retraining models on backend...
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Global Feature Importance (SHAP) -->
-                        <div class="card flex-grow">
-                            <div class="card-header">
-                                <i class="fa-solid fa-globe"></i>
-                                <h3>SHAP Global Feature Importance</h3>
-                            </div>
-                            <div class="card-body">
-                                <div class="chart-container">
-                                    <canvas id="global-importance-chart"></canvas>
-                                </div>
+                                <div class="retrain-status" id="retrain-output" role="status" hidden></div>
                             </div>
                         </div>
                     </div>
                 </div>
             </section>
 
-            <!-- Tab Content: RAG Search -->
-            <section class="tab-content" id="rag-search-tab">
+            <!-- Tab 3 -->
+            <section class="tab-content" id="rag-search-tab" role="tabpanel" aria-labelledby="tab-btn-rag-search" hidden>
                 <div class="card search-card-top">
                     <div class="card-body">
-                        <div class="search-input-wrapper">
-                            <i class="fa-solid fa-magnifying-glass search-icon"></i>
-                            <input type="text" id="rag-query" placeholder="Ask a clinical question or search papers (e.g. 'deep learning models in breast cancer classification' or 'CAR-T Cell Immunotherapy')..." class="search-input">
-                            <button class="btn btn-primary" id="btn-rag-search">
-                                <i class="fa-solid fa-magnifying-glass-chart"></i> Search Corpus
-                            </button>
-                        </div>
+                        <form id="rag-form" class="search-input-wrapper" role="search">
+                            <label for="rag-query" class="sr-only">Research question</label>
+                            <i class="fa-solid fa-magnifying-glass search-icon" aria-hidden="true"></i>
+                            <input type="text" id="rag-query" maxlength="500" autocomplete="off" placeholder="Ask a question about the indexed literature (e.g. 'What are the risk factors for breast cancer?')" class="search-input">
+                            <button type="submit" class="btn btn-primary" id="btn-rag-search"><i class="fa-solid fa-magnifying-glass" aria-hidden="true"></i> Search</button>
+                        </form>
                         <div class="quick-tags">
                             <span>Examples:</span>
-                            <a href="#" class="quick-tag">CNNs for breast cancer screening</a>
-                            <a href="#" class="quick-tag">liquid biopsy diagnostic utility</a>
-                            <a href="#" class="quick-tag">CRISPR-Cas9 gene editing</a>
-                            <a href="#" class="quick-tag">predicting immunotherapy response</a>
+                            <button type="button" class="quick-tag">What are the risk factors for breast cancer?</button>
+                            <button type="button" class="quick-tag">How is breast cancer screened with mammography?</button>
+                            <button type="button" class="quick-tag">Role of BRCA1 and BRCA2 genes</button>
                         </div>
+                        <p class="fineprint" id="rag-corpus-note"></p>
                     </div>
                 </div>
-
-                <div class="search-results-meta" id="rag-results-info" style="display: none;">
-                    Found <span id="rag-results-count">0</span> matching segments across 500+ indexed biomedical papers in <span id="rag-results-latency">0</span> ms
-                </div>
-
-                <div class="search-results-grid" id="rag-results-container">
-                    <!-- RAG results injected here -->
+                <div class="search-results-meta" id="rag-results-info" hidden></div>
+                <div id="rag-results-container" class="search-results-grid" aria-live="polite">
                     <div class="no-results">
-                        <i class="fa-solid fa-magnifying-glass-arrow-right"></i>
-                        <h4>Query the Medical Literature RAG Corpus</h4>
-                        <p>Search over 500+ cancer-related research papers and PDF references indexed via FAISS & Sentence Transformers.</p>
+                        <i class="fa-solid fa-book-open" aria-hidden="true"></i>
+                        <h4>Ask a question</h4>
+                        <p>Answers are sentences quoted verbatim from the indexed documents, each with a numbered source. Nothing is generated.</p>
                     </div>
                 </div>
             </section>
 
-            <!-- Tab Content: Batch Inference -->
-            <section class="tab-content" id="batch-inference-tab">
+            <!-- Tab 4 -->
+            <section class="tab-content" id="batch-inference-tab" role="tabpanel" aria-labelledby="tab-btn-batch-inference" hidden>
                 <div class="grid-2col-73">
-                    <!-- Left: CSV Upload & Results Table -->
                     <div class="card">
-                        <div class="card-header">
-                            <i class="fa-solid fa-file-excel"></i>
-                            <h3>Upload Batch Data</h3>
-                        </div>
+                        <div class="card-header"><i class="fa-solid fa-file-excel" aria-hidden="true"></i><h3>Batch classification</h3></div>
                         <div class="card-body">
-                            <div class="upload-zone" id="csv-dropzone">
-                                <i class="fa-solid fa-cloud-arrow-up upload-icon"></i>
-                                <h4>Drag & Drop Patient CSV File</h4>
-                                <p>File should contain medical features: Cl.thickness, Cell.size, Cell.shape, Marg.adhesion, Epith.c.size, Bare.nuclei, Bl.cromatin, Normal.nucleoli, Mitoses</p>
-                                <div class="upload-actions">
-                                    <label for="csv-file-input" class="btn btn-outline">Choose File</label>
-                                    <input type="file" id="csv-file-input" accept=".csv" style="display: none;">
-                                </div>
+                            <div class="upload-zone" id="csv-dropzone" tabindex="0" role="button" aria-label="Choose or drop a CSV file">
+                                <i class="fa-solid fa-cloud-arrow-up upload-icon" aria-hidden="true"></i>
+                                <h4>Drop a CSV here or press Enter to choose</h4>
+                                <p>Required columns: the nine feature names. Up to 1000 rows, 1 MB. Extra columns are rejected.</p>
+                                <input type="file" id="csv-file-input" accept=".csv,text/csv" hidden>
                             </div>
-
-                            <div class="batch-results-wrapper" id="batch-results-area" style="display: none;">
+                            <div class="banner banner-error" id="batch-error" role="alert" hidden></div>
+                            <div class="batch-results-wrapper" id="batch-results-area" hidden>
                                 <div class="batch-results-header">
-                                    <h4>Batch Prediction Results</h4>
-                                    <button class="btn btn-outline btn-sm" id="btn-download-results">
-                                        <i class="fa-solid fa-download"></i> Download CSV
-                                    </button>
+                                    <h4>Results</h4>
+                                    <button type="button" class="btn btn-outline btn-sm" id="btn-download-results"><i class="fa-solid fa-download" aria-hidden="true"></i> Download CSV</button>
                                 </div>
                                 <div class="table-container">
                                     <table class="data-table" id="batch-table">
-                                        <thead>
-                                            <tr>
-                                                <th>Patient #</th>
-                                                <th>Risk Class</th>
-                                                <th>Confidence</th>
-                                                <th>RF Prob</th>
-                                                <th>LR Prob</th>
-                                                <th>SVM Prob</th>
-                                            </tr>
-                                        </thead>
-                                        <tbody>
-                                            <!-- Dynamically filled -->
-                                        </tbody>
+                                        <caption class="sr-only">Batch predictions</caption>
+                                        <thead><tr><th scope="col">Row</th><th scope="col">Prediction</th><th scope="col">Model score</th><th scope="col">LR</th><th scope="col">RF</th><th scope="col">SVM</th></tr></thead>
+                                        <tbody></tbody>
                                     </table>
                                 </div>
                             </div>
                         </div>
                     </div>
-
-                    <!-- Right: CSV template download / guidance -->
                     <div class="card">
-                        <div class="card-header">
-                            <i class="fa-solid fa-circle-question"></i>
-                            <h3>Template & Schema Guide</h3>
-                        </div>
+                        <div class="card-header"><i class="fa-solid fa-circle-question" aria-hidden="true"></i><h3>Template &amp; schema</h3></div>
                         <div class="card-body">
-                            <p class="card-text-desc">To run batch predictions, upload a CSV structured with the clinical features scaled between 1 and 10.</p>
-                            
-                            <a href="#" class="btn btn-outline btn-full" id="btn-download-template">
-                                <i class="fa-solid fa-file-arrow-down"></i> Download CSV Template
-                            </a>
-
-                            <div class="schema-info-list">
-                                <div class="schema-info-item">
-                                    <strong>Cl.thickness:</strong> 1 (thin) - 10 (thick)
-                                </div>
-                                <div class="schema-info-item">
-                                    <strong>Cell.size:</strong> 1 (uniform) - 10 (varied)
-                                </div>
-                                <div class="schema-info-item">
-                                    <strong>Cell.shape:</strong> 1 (uniform) - 10 (varied)
-                                </div>
-                                <div class="schema-info-item">
-                                    <strong>Marg.adhesion:</strong> 1 (normal) - 10 (high)
-                                </div>
-                                <div class="schema-info-item">
-                                    <strong>Epith.c.size:</strong> 1 (normal) - 10 (enlarged)
-                                </div>
-                                <div class="schema-info-item">
-                                    <strong>Bare.nuclei:</strong> 1 (none) - 10 (many)
-                                </div>
-                                <div class="schema-info-item">
-                                    <strong>Bl.cromatin:</strong> 1 (fine) - 10 (coarse)
-                                </div>
-                                <div class="schema-info-item">
-                                    <strong>Normal.nucleoli:</strong> 1 (normal) - 10 (prominent)
-                                </div>
-                                <div class="schema-info-item">
-                                    <strong>Mitoses:</strong> 1 (none) - 10 (highly active)
-                                </div>
-                            </div>
+                            <button type="button" class="btn btn-outline btn-full" id="btn-download-template"><i class="fa-solid fa-file-arrow-down" aria-hidden="true"></i> Download CSV template</button>
+                            <div class="schema-info-list" id="schema-list"></div>
                         </div>
                     </div>
                 </div>
             </section>
         </main>
     </div>
-    
-    <script src="/static/app.js"></script>
 </body>
 </html>
